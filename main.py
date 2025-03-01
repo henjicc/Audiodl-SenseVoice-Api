@@ -19,16 +19,25 @@ import numpy as np
 import aiohttp
 from fastapi import FastAPI, Form, UploadFile, HTTPException
 from pydantic import HttpUrl, ValidationError, BaseModel, Field
-from typing import List, Union
+from typing import List, Union, Optional
 from funasr_onnx import SenseVoiceSmall
 from funasr_onnx.utils.postprocess_utils import rich_transcription_postprocess
 from io import BytesIO
+import tempfile
+import os
+import subprocess
+import shutil
 
 
 class ApiResponse(BaseModel):
     message: str = Field(..., description="Status message indicating the success of the operation.")
     results: str = Field(..., description="Remove label output")
     label_result: str = Field(..., description="Default output")
+
+
+class DownloadRequest(BaseModel):
+    url: HttpUrl = Field(..., description="URL for downloading audio or video")
+    language: Optional[str] = Field("auto", description="Language code or 'auto' for automatic detection")
 
 
 app = FastAPI()
@@ -72,6 +81,55 @@ async def upload_url(url: Union[HttpUrl, None] = Form(None), file: Union[UploadF
         raise HTTPException(status_code=400, detail=e.errors())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/dl_audio_to_text", response_model=ApiResponse)
+async def download_audio_to_text(request: DownloadRequest):
+    # 创建临时目录
+    temp_dir = tempfile.mkdtemp()
+    try:
+        # 下载音频
+        download_cmd = [
+            "yt-dlp", 
+            "-x",  # 提取音频
+            "--audio-format", "wav",  # 转换为wav格式
+            "-o", f"{temp_dir}/%(title)s.%(ext)s",  # 输出文件路径
+            str(request.url)
+        ]
+        
+        # 执行下载命令
+        process = subprocess.run(download_cmd, capture_output=True, text=True)
+        if process.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"下载音频失败: {process.stderr}"
+            )
+        
+        # 获取下载的文件路径（应该只有一个文件）
+        downloaded_files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.endswith('.wav')]
+        
+        if not downloaded_files:
+            raise HTTPException(
+                status_code=500,
+                detail="下载成功但未找到音频文件"
+            )
+        
+        audio_path = downloaded_files[0]
+        
+        # 处理音频文件
+        res = model(audio_path, language=request.language, use_itn=True)
+        
+        return {
+            "message": "音频处理成功", 
+            "results": rich_transcription_postprocess(res[0]),
+            "label_result": res[0]
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
+        # 清理临时目录
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

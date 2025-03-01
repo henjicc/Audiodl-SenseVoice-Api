@@ -6,3 +6,4 @@ librosa==0.10.2
 aiohttp==3.10.5
 python-multipart==0.0.9
 jieba==0.42.1
+yt-dlp

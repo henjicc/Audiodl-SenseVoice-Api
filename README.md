@@ -66,6 +66,16 @@ python main.py
     --header 'content-type: multipart/form-data' \
     --form 'file=@asr_example_zh.wav'
    ```
+3. 从视频/音频链接下载并转文字
+   ```
+   curl --request POST \
+    --url http://127.0.0.1:8000/dl_audio_to_text \
+    --header 'content-type: application/json' \
+    --data '{
+      "url": "https://www.youtube.com/watch?v=示例视频ID",
+      "language": "auto"
+    }'
+   ```
 
 ### 接口文档
 ```
